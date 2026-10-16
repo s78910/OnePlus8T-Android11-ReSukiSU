@@ -384,37 +384,23 @@ SYSCALL_DEFINE4(reboot, int, magic1, int, magic2, unsigned int, cmd,'''
         with open(stat_c, 'r', encoding='utf-8', errors='ignore') as f:
             stat_content = f.read()
         
-        # Add declarations
-        if "ksu_handle_newfstat_ret" not in stat_content:
-            decl_target = '#include "internal.h"'
-            decl_inject = '''#include "internal.h"
+        # Hook SYSCALL_DEFINE2(newfstat, unsigned int, fd, struct stat __user *, statbuf)
+        target_newfstat = "SYSCALL_DEFINE2(newfstat, unsigned int, fd, struct stat __user *, statbuf)\n{\n\tstruct kstat stat;\n\tint error = vfs_fstat(fd, &stat);\n\n\tif (!error)\n\t\terror = cp_new_stat(&stat, statbuf);\n\n\treturn error;\n}"
+        inject_newfstat = "#ifdef CONFIG_KSU_MANUAL_HOOK\nextern void ksu_handle_newfstat_ret(unsigned int *fd, struct stat __user **statbuf_ptr);\n#endif\nSYSCALL_DEFINE2(newfstat, unsigned int, fd, struct stat __user *, statbuf)\n{\n\tstruct kstat stat;\n\tint error = vfs_fstat(fd, &stat);\n\n\tif (!error)\n\t\terror = cp_new_stat(&stat, statbuf);\n#ifdef CONFIG_KSU_MANUAL_HOOK\n\tksu_handle_newfstat_ret(&fd, &statbuf);\n#endif\n\n\treturn error;\n}"
+        if target_newfstat in stat_content and "ksu_handle_newfstat_ret(&fd" not in stat_content:
+            stat_content = stat_content.replace(target_newfstat, inject_newfstat, 1)
+            print("[+] Successfully hooked newfstat in fs/stat.c")
 
-#ifdef CONFIG_KSU_MANUAL_HOOK
-extern void ksu_handle_newfstat_ret(unsigned int *fd, struct stat __user **statbuf_ptr);
-#if defined(__ARCH_WANT_STAT64) || defined(__ARCH_WANT_COMPAT_STAT64)
-extern void ksu_handle_fstat64_ret(unsigned long *fd, struct stat64 __user **statbuf_ptr);
-#endif
-#endif'''
-            if decl_target in stat_content:
-                stat_content = stat_content.replace(decl_target, decl_inject, 1)
-            else:
-                stat_content = "#ifdef CONFIG_KSU_MANUAL_HOOK\nextern void ksu_handle_newfstat_ret(unsigned int *fd, struct stat __user **statbuf_ptr);\n#if defined(__ARCH_WANT_STAT64) || defined(__ARCH_WANT_COMPAT_STAT64)\nextern void ksu_handle_fstat64_ret(unsigned long *fd, struct stat64 __user **statbuf_ptr);\n#endif\n#endif\n" + stat_content
-
-        # Hook SYSCALL_DEFINE2(newfstat
-        newfstat_old = "\tif (!error)\n\t\terror = cp_new_stat(&stat, statbuf);\n\n\treturn error;"
-        newfstat_new = "\tif (!error)\n\t\terror = cp_new_stat(&stat, statbuf);\n\n#ifdef CONFIG_KSU_MANUAL_HOOK\n\tksu_handle_newfstat_ret(&fd, &statbuf);\n#endif\n\treturn error;"
-        if newfstat_old in stat_content and "ksu_handle_newfstat_ret(&fd" not in stat_content:
-            stat_content = stat_content.replace(newfstat_old, newfstat_new, 1)
-
-        # Hook SYSCALL_DEFINE2(fstat64
-        fstat64_old = "\tif (!error)\n\t\terror = cp_new_stat64(&stat, statbuf);\n\n\treturn error;"
-        fstat64_new = "\tif (!error)\n\t\terror = cp_new_stat64(&stat, statbuf);\n\n#ifdef CONFIG_KSU_MANUAL_HOOK\n\tksu_handle_fstat64_ret(&fd, &statbuf);\n#endif\n\treturn error;"
-        if fstat64_old in stat_content and "ksu_handle_fstat64_ret(&fd" not in stat_content:
-            stat_content = stat_content.replace(fstat64_old, fstat64_new, 1)
+        # Hook SYSCALL_DEFINE2(fstat64, unsigned long, fd, struct stat64 __user *, statbuf)
+        target_fstat64 = "SYSCALL_DEFINE2(fstat64, unsigned long, fd, struct stat64 __user *, statbuf)\n{\n\tstruct kstat stat;\n\tint error = vfs_fstat(fd, &stat);\n\n\tif (!error)\n\t\terror = cp_new_stat64(&stat, statbuf);\n\n\treturn error;\n}"
+        inject_fstat64 = "#ifdef CONFIG_KSU_MANUAL_HOOK\nextern void ksu_handle_fstat64_ret(unsigned long *fd, struct stat64 __user **statbuf_ptr);\n#endif\nSYSCALL_DEFINE2(fstat64, unsigned long, fd, struct stat64 __user *, statbuf)\n{\n\tstruct kstat stat;\n\tint error = vfs_fstat(fd, &stat);\n\n\tif (!error)\n\t\terror = cp_new_stat64(&stat, statbuf);\n#ifdef CONFIG_KSU_MANUAL_HOOK\n\tksu_handle_fstat64_ret(&fd, &statbuf);\n#endif\n\n\treturn error;\n}"
+        if target_fstat64 in stat_content and "ksu_handle_fstat64_ret(&fd" not in stat_content:
+            stat_content = stat_content.replace(target_fstat64, inject_fstat64, 1)
+            print("[+] Successfully hooked fstat64 in fs/stat.c")
 
         with open(stat_c, 'w', encoding='utf-8') as f:
             f.write(stat_content)
-        print("[+] Successfully hooked fs/stat.c for BakaSU newfstat/fstat64")
+        print("[+] Finished hooking fs/stat.c")
 
     # 11. BakaSU integration: selinux.c, rules.c, sucompat.c, Kconfig, ksud_integration.c, core/init.c
     for ksu_root in [os.path.join(kernel_dir, "drivers", "kernelsu"), os.path.join(kernel_dir, "KernelSU", "kernel")]:
