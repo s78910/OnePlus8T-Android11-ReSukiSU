@@ -1,0 +1,140 @@
+name: Build OnePlus 8T Android 11 ReSukiSU + SuSFS Kernel
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+env:
+  DEBIAN_FRONTEND: noninteractive
+
+jobs:
+  build:
+    name: Build Kernel for OnePlus 8T (Android 11)
+    runs-on: ubuntu-22.04
+    timeout-minutes: 180
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Maximize build space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache
+          if [ ! -f /swapfile ]; then
+            sudo fallocate -l 10G /swapfile || true
+            sudo chmod 600 /swapfile || true
+            sudo mkswap /swapfile || true
+            sudo swapon /swapfile || true
+          fi
+          free -h
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y --no-install-recommends \
+            git ccache automake flex lzop bison build-essential zip curl \
+            bc libssl-dev libelf-dev libfl-dev python3 device-tree-compiler \
+            cpio zstd binutils p7zip-full dwarves patch
+
+          curl -s -L http://launchpadlibrarian.net/580830584/libtinfo5_6.3-2_amd64.deb -o libtinfo5.deb || true
+          if [ -f libtinfo5.deb ]; then
+            sudo dpkg -i libtinfo5.deb || true
+            rm -f libtinfo5.deb
+          fi
+
+          sudo rm -f /usr/bin/python
+          sudo ln -s /usr/bin/python3 /usr/bin/python
+
+      - name: Download toolchains
+        run: |
+          cd $GITHUB_WORKSPACE
+          echo "Cloning GCC 4.9 toolchains..."
+          git clone --depth=1 https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9.git -b android12L-release gcc-64
+          git clone --depth=1 https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/arm/arm-linux-androideabi-4.9.git -b android12L-release gcc-32
+
+          echo "Downloading ZyCromerZ Clang 10.0.1 (Android 11 NDK Certified)..."
+          curl -s -L "https://github.com/ZyCromerZ/Clang/releases/download/10.0.1-20220724-release/Clang-10.0.1-20220724.tar.gz" -o clang-custom.tar.gz
+          mkdir -p clang-custom
+          tar -xzf clang-custom.tar.gz -C clang-custom/
+          rm -f clang-custom.tar.gz
+
+      - name: Clone OnePlus 8T Android 11 Kernel Source
+        run: |
+          cd $GITHUB_WORKSPACE
+          git clone --depth=1 -b oneplus/SM8250_R_11.0 https://github.com/OnePlusOSS/android_kernel_oneplus_sm8250.git device_kernel
+
+      - name: Integrate SuSFS, ReSukiSU & Syscall Hooks
+        run: |
+          chmod +x $GITHUB_WORKSPACE/patch_kernel.sh
+          bash $GITHUB_WORKSPACE/patch_kernel.sh
+
+      - name: Build Kernel Image
+        run: |
+          cd $GITHUB_WORKSPACE/device_kernel
+          export PATH=$GITHUB_WORKSPACE/clang-custom/bin:$PATH
+
+          # Stock build environment spoofing (matches user OnePlus 8T stock banner)
+          export KBUILD_BUILD_USER="jenkins"
+          export KBUILD_BUILD_HOST="rd-build-77"
+          export KBUILD_BUILD_VERSION="1"
+          export KBUILD_BUILD_TIMESTAMP="Tue Dec 21 14:19:26 CST 2021"
+
+          make O=out ARCH=arm64 \
+            CC="clang" \
+            CLANG_TRIPLE=aarch64-linux-gnu- \
+            NM=llvm-nm \
+            OBJDUMP=llvm-objdump \
+            STRIP=llvm-strip \
+            CROSS_COMPILE=$GITHUB_WORKSPACE/gcc-64/bin/aarch64-linux-android- \
+            CROSS_COMPILE_ARM32=$GITHUB_WORKSPACE/gcc-32/bin/arm-linux-androideabi- \
+            vendor/kona-perf_defconfig
+
+          ./scripts/config --file out/.config --disable CONFIG_DEBUG_INFO_BTF
+          ./scripts/config --file out/.config --disable CONFIG_MODULE_SIG
+          ./scripts/config --file out/.config --disable CONFIG_MODULE_SIG_FORCE
+          ./scripts/config --file out/.config --disable CONFIG_MODULE_SIG_ALL
+          ./scripts/config --file out/.config --enable CONFIG_MODULE_FORCE_LOAD
+          make O=out ARCH=arm64 olddefconfig
+
+          echo "=== Verified Kernel Configurations ==="
+          grep -E "CONFIG_KSU|CONFIG_LOCALVERSION|CONFIG_MODULE_SIG|CONFIG_MODULE_FORCE_LOAD" out/.config || true
+
+          make -j$(nproc --all) O=out ARCH=arm64 \
+            CC="clang" \
+            CLANG_TRIPLE=aarch64-linux-gnu- \
+            NM=llvm-nm \
+            OBJDUMP=llvm-objdump \
+            STRIP=llvm-strip \
+            CROSS_COMPILE=$GITHUB_WORKSPACE/gcc-64/bin/aarch64-linux-android- \
+            CROSS_COMPILE_ARM32=$GITHUB_WORKSPACE/gcc-32/bin/arm-linux-androideabi- \
+            Image dtbs
+
+          echo "=== Verified Built Kernel Banner ==="
+          strings out/arch/arm64/boot/Image | grep "Linux version" || true
+
+      - name: Package AnyKernel3
+        run: |
+          cd $GITHUB_WORKSPACE/device_kernel
+          git clone --depth=1 https://github.com/osm0sis/AnyKernel3.git Anykernel3
+
+          sed -i 's/do.devicecheck=1/do.devicecheck=0/g' Anykernel3/anykernel.sh
+          sed -i 's!BLOCK=/dev/block/platform/omap/omap_hsmmc.0/by-name/boot;!BLOCK=auto;!g' Anykernel3/anykernel.sh
+          sed -i 's/IS_SLOT_DEVICE=0;/is_slot_device=auto;/g' Anykernel3/anykernel.sh
+
+          mkdir -p tmp
+          cp -fp out/arch/arm64/boot/Image tmp/
+          if [ -f out/arch/arm64/boot/dtb ]; then
+            cp -fp out/arch/arm64/boot/dtb tmp/
+          fi
+          cp -rp Anykernel3/* tmp/
+          cd tmp
+          zip -r9 $GITHUB_WORKSPACE/OnePlus8T-Android11-ReSukiSU-AK3.zip * -x .git README.md *placeholder
+          cd $GITHUB_WORKSPACE
+
+      - name: Upload Kernel Zip
+        uses: actions/upload-artifact@v4
+        with:
+          name: OnePlus8T-Android11-ReSukiSU-AK3
+          path: OnePlus8T-Android11-ReSukiSU-AK3.zip

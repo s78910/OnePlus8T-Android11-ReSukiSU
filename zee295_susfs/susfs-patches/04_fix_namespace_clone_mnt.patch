@@ -1,0 +1,38 @@
+--- a/fs/namespace.c
++++ b/fs/namespace.c
+@@ -1204,11 +1204,37 @@ static struct mount *clone_mnt(struct mount *old, struct dentry *root,
+ {
+ 	struct super_block *sb = old->mnt.mnt_sb;
+ 	struct mount *mnt;
+ 	int err;
+
++#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
++	// We won't check it anymore if boot-completed stage is triggered.
++	if (susfs_is_boot_completed_triggered) {
++		goto skip_checking_for_ksu_proc;
++	}
++	// First we must check for ksu process because of magic mount
++	if (susfs_is_current_ksu_domain()) {
++		// if it is unsharing, we reuse the old->mnt_id
++		if (flag & CL_COPY_MNT_NS) {
++			mnt = susfs_reuse_sus_vfsmnt(old->mnt_devname, old->mnt_id);
++			goto bypass_orig_flow;
++		}
++		// else we just go assign fake mnt_id
++		mnt = susfs_alloc_sus_vfsmnt(old->mnt_devname);
++		goto bypass_orig_flow;
++	}
++skip_checking_for_ksu_proc:
++	// Lastly for other processes of which old->mnt_id == DEFAULT_KSU_MNT_ID, go assign fake mnt_id
++	if (old->mnt_id == DEFAULT_KSU_MNT_ID) {
++		mnt = susfs_alloc_sus_vfsmnt(old->mnt_devname);
++		goto bypass_orig_flow;
++	}
++#endif
+ 	mnt = alloc_vfsmnt(old->mnt_devname);
++#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
++bypass_orig_flow:
++#endif
+ 	if (!mnt)
+ 		return ERR_PTR(-ENOMEM);
+

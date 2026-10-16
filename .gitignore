@@ -1,0 +1,6 @@
+*.tar.gz
+*.zip
+*.img
+out/
+tmp/
+*.log
