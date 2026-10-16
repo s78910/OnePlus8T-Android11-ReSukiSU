@@ -4,6 +4,16 @@ set -e
 cd $GITHUB_WORKSPACE/device_kernel
 
 echo "=========================================="
+echo "0. Fixing Qualcomm scripts/gcc-wrapper.py (Bypass Python 2 dependency)..."
+echo "=========================================="
+if [ -f scripts/gcc-wrapper.py ]; then
+    echo '#!/bin/sh' > scripts/gcc-wrapper.py
+    echo 'exec "$@"' >> scripts/gcc-wrapper.py
+    chmod +x scripts/gcc-wrapper.py
+    echo "[+] scripts/gcc-wrapper.py successfully bypassed"
+fi
+
+echo "=========================================="
 echo "1. Injecting ReSukiSU driver..."
 echo "=========================================="
 curl -LSs "https://raw.githubusercontent.com/Baka-SU/BakaSU/refs/heads/main/kernel/setup.sh" | bash -s main
