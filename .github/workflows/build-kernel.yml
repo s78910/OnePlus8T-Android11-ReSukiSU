@@ -83,6 +83,7 @@ jobs:
 
           make O=out ARCH=arm64 \
             CC="clang" \
+            HOSTCFLAGS="-fcommon" \
             CLANG_TRIPLE=aarch64-linux-gnu- \
             NM=llvm-nm \
             OBJDUMP=llvm-objdump \
@@ -96,13 +97,14 @@ jobs:
           ./scripts/config --file out/.config --disable CONFIG_MODULE_SIG_FORCE
           ./scripts/config --file out/.config --disable CONFIG_MODULE_SIG_ALL
           ./scripts/config --file out/.config --enable CONFIG_MODULE_FORCE_LOAD
-          make O=out ARCH=arm64 olddefconfig
+          make O=out ARCH=arm64 HOSTCFLAGS="-fcommon" olddefconfig
 
           echo "=== Verified Kernel Configurations ==="
           grep -E "CONFIG_KSU|CONFIG_LOCALVERSION|CONFIG_MODULE_SIG|CONFIG_MODULE_FORCE_LOAD" out/.config || true
 
           make -j$(nproc --all) O=out ARCH=arm64 \
             CC="clang" \
+            HOSTCFLAGS="-fcommon" \
             CLANG_TRIPLE=aarch64-linux-gnu- \
             NM=llvm-nm \
             OBJDUMP=llvm-objdump \

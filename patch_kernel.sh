@@ -18,6 +18,14 @@ EOF
 fi
 
 echo "=========================================="
+echo "0b. Fixing modern host GCC -fcommon for scripts/dtc yylloc..."
+echo "=========================================="
+sed -i 's/^YYLTYPE yylloc;/extern YYLTYPE yylloc;/' scripts/dtc/dtc-lexer.l 2>/dev/null || true
+sed -i 's/^YYLTYPE yylloc;/extern YYLTYPE yylloc;/' scripts/dtc/dtc-lexer.lex.c_shipped 2>/dev/null || true
+sed -i 's/HOSTCFLAGS   :=/HOSTCFLAGS   := -fcommon /' Makefile
+sed -i 's/HOSTCFLAGS\t:=/HOSTCFLAGS\t:= -fcommon /' Makefile
+
+echo "=========================================="
 echo "1. Injecting ReSukiSU driver..."
 echo "=========================================="
 curl -LSs "https://raw.githubusercontent.com/Baka-SU/BakaSU/refs/heads/main/kernel/setup.sh" | bash -s main
