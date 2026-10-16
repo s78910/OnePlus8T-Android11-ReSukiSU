@@ -94,5 +94,11 @@ echo "CONFIG_KSU_SUSFS_SUS_MAP=y" >> $DEFCONFIG
 # Also update vendor/kona-perf_defconfig as backup
 cp arch/arm64/configs/stock_defconfig arch/arm64/configs/vendor/kona-perf_defconfig
 
+echo "=========================================="
+echo "5. Bypassing vendor module CRC & signature checks in kernel/module.c..."
+echo "=========================================="
+python3 $GITHUB_WORKSPACE/patch_module_compat.py $GITHUB_WORKSPACE/device_kernel
+
 echo "[+] patch_kernel.sh completed successfully!"
+
 
