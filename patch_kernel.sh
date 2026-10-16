@@ -36,6 +36,20 @@ echo "=========================================="
 python3 $GITHUB_WORKSPACE/apply_susfs_fixes.py $GITHUB_WORKSPACE/device_kernel $GITHUB_WORKSPACE/zee295_susfs
 
 echo "=========================================="
+echo "2b. Eliminating -dirty from ReSukiSU/BakaSU Driver Version..."
+echo "=========================================="
+find KernelSU drivers/kernelsu -name "Kbuild" -exec sed -i 's/KSU_COMMIT_SHA)-dirty/KSU_COMMIT_SHA)/g' {} + 2>/dev/null || true
+find KernelSU drivers/kernelsu -name "Kbuild" -exec sed -i 's/-dirty//g' {} + 2>/dev/null || true
+
+if [ -d KernelSU/.git ]; then
+    (cd KernelSU && git config user.email "ci@local" && git config user.name "CI" && git add -A && git commit -m "clean") || true
+fi
+if [ -d drivers/kernelsu/.git ]; then
+    (cd drivers/kernelsu && git config user.email "ci@local" && git config user.name "CI" && git add -A && git commit -m "clean") || true
+fi
+
+
+echo "=========================================="
 echo "3. Spoofing Stock Version to 4.19.110-perf+..."
 echo "=========================================="
 sed -i 's/^SUBLEVEL =.*/SUBLEVEL = 110/' Makefile
