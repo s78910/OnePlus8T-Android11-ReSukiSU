@@ -90,17 +90,20 @@ jobs:
             STRIP=llvm-strip \
             CROSS_COMPILE=$GITHUB_WORKSPACE/gcc-64/bin/aarch64-linux-android- \
             CROSS_COMPILE_ARM32=$GITHUB_WORKSPACE/gcc-32/bin/arm-linux-androideabi- \
-            vendor/kona-perf_defconfig
+            stock_defconfig
 
           ./scripts/config --file out/.config --disable CONFIG_DEBUG_INFO_BTF
           ./scripts/config --file out/.config --disable CONFIG_MODULE_SIG
           ./scripts/config --file out/.config --disable CONFIG_MODULE_SIG_FORCE
           ./scripts/config --file out/.config --disable CONFIG_MODULE_SIG_ALL
           ./scripts/config --file out/.config --enable CONFIG_MODULE_FORCE_LOAD
+          ./scripts/config --file out/.config --set-str CONFIG_MODULE_SIG_KEY ""
+          ./scripts/config --file out/.config --set-str CONFIG_SYSTEM_TRUSTED_KEYS ""
           make O=out ARCH=arm64 HOSTCFLAGS="-fcommon" olddefconfig
 
           echo "=== Verified Kernel Configurations ==="
           grep -E "CONFIG_KSU|CONFIG_LOCALVERSION|CONFIG_MODULE_SIG|CONFIG_MODULE_FORCE_LOAD" out/.config || true
+
 
           make -j$(nproc --all) O=out ARCH=arm64 \
             CC="clang" \

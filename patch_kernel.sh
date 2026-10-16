@@ -48,9 +48,10 @@ chmod +x scripts/setlocalversion
 touch .scmversion
 
 echo "=========================================="
-echo "4. Applying OnePlus defconfig, Manual Hook & SuSFS flags..."
+echo "4. Applying OnePlus Golden stock_config, Manual Hook & SuSFS flags..."
 echo "=========================================="
-DEFCONFIG="arch/arm64/configs/vendor/kona-perf_defconfig"
+cp $GITHUB_WORKSPACE/stock_config arch/arm64/configs/stock_defconfig
+DEFCONFIG="arch/arm64/configs/stock_defconfig"
 
 # Disable problematic BTF debugging
 sed -i 's/CONFIG_DEBUG_INFO_BTF=y/# CONFIG_DEBUG_INFO_BTF is not set/g' $DEFCONFIG
@@ -60,6 +61,8 @@ echo "CONFIG_DEBUG_INFO_BTF=n" >> $DEFCONFIG
 sed -i 's/CONFIG_MODULE_SIG=y/# CONFIG_MODULE_SIG is not set/g' $DEFCONFIG
 sed -i 's/CONFIG_MODULE_SIG_FORCE=y/# CONFIG_MODULE_SIG_FORCE is not set/g' $DEFCONFIG
 sed -i 's/CONFIG_MODULE_SIG_ALL=y/# CONFIG_MODULE_SIG_ALL is not set/g' $DEFCONFIG
+sed -i '/CONFIG_MODULE_SIG_KEY/d' $DEFCONFIG
+sed -i '/CONFIG_MODULE_FORCE_LOAD/d' $DEFCONFIG
 echo "CONFIG_MODULE_FORCE_LOAD=y" >> $DEFCONFIG
 
 # Ensure exact localversion
@@ -88,4 +91,8 @@ echo "CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG=y" >> $DEFCONFIG
 echo "CONFIG_KSU_SUSFS_OPEN_REDIRECT=y" >> $DEFCONFIG
 echo "CONFIG_KSU_SUSFS_SUS_MAP=y" >> $DEFCONFIG
 
+# Also update vendor/kona-perf_defconfig as backup
+cp arch/arm64/configs/stock_defconfig arch/arm64/configs/vendor/kona-perf_defconfig
+
 echo "[+] patch_kernel.sh completed successfully!"
+
