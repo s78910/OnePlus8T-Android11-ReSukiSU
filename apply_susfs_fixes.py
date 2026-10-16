@@ -232,6 +232,44 @@ SYSCALL_DEFINE4(reboot, int, magic1, int, magic2, unsigned int, cmd,'''
                 f.write(reb_content)
             print("[+] Successfully hooked kernel/reboot.c for SuSFS supercalls")
 
+    # 10c. Hook fs/stat.c for BakaSU ksu_handle_newfstat_ret & ksu_handle_fstat64_ret
+    stat_c = os.path.join(kernel_dir, "fs", "stat.c")
+    if os.path.exists(stat_c):
+        with open(stat_c, 'r', encoding='utf-8', errors='ignore') as f:
+            stat_content = f.read()
+        
+        # Add declarations
+        if "ksu_handle_newfstat_ret" not in stat_content:
+            decl_target = '#include "internal.h"'
+            decl_inject = '''#include "internal.h"
+
+#ifdef CONFIG_KSU_MANUAL_HOOK
+extern void ksu_handle_newfstat_ret(unsigned int *fd, struct stat __user **statbuf_ptr);
+#if defined(__ARCH_WANT_STAT64) || defined(__ARCH_WANT_COMPAT_STAT64)
+extern void ksu_handle_fstat64_ret(unsigned long *fd, struct stat64 __user **statbuf_ptr);
+#endif
+#endif'''
+            if decl_target in stat_content:
+                stat_content = stat_content.replace(decl_target, decl_inject, 1)
+            else:
+                stat_content = "#ifdef CONFIG_KSU_MANUAL_HOOK\nextern void ksu_handle_newfstat_ret(unsigned int *fd, struct stat __user **statbuf_ptr);\n#if defined(__ARCH_WANT_STAT64) || defined(__ARCH_WANT_COMPAT_STAT64)\nextern void ksu_handle_fstat64_ret(unsigned long *fd, struct stat64 __user **statbuf_ptr);\n#endif\n#endif\n" + stat_content
+
+        # Hook SYSCALL_DEFINE2(newfstat
+        newfstat_old = "\tif (!error)\n\t\terror = cp_new_stat(&stat, statbuf);\n\n\treturn error;"
+        newfstat_new = "\tif (!error)\n\t\terror = cp_new_stat(&stat, statbuf);\n\n#ifdef CONFIG_KSU_MANUAL_HOOK\n\tksu_handle_newfstat_ret(&fd, &statbuf);\n#endif\n\treturn error;"
+        if newfstat_old in stat_content and "ksu_handle_newfstat_ret(&fd" not in stat_content:
+            stat_content = stat_content.replace(newfstat_old, newfstat_new, 1)
+
+        # Hook SYSCALL_DEFINE2(fstat64
+        fstat64_old = "\tif (!error)\n\t\terror = cp_new_stat64(&stat, statbuf);\n\n\treturn error;"
+        fstat64_new = "\tif (!error)\n\t\terror = cp_new_stat64(&stat, statbuf);\n\n#ifdef CONFIG_KSU_MANUAL_HOOK\n\tksu_handle_fstat64_ret(&fd, &statbuf);\n#endif\n\treturn error;"
+        if fstat64_old in stat_content and "ksu_handle_fstat64_ret(&fd" not in stat_content:
+            stat_content = stat_content.replace(fstat64_old, fstat64_new, 1)
+
+        with open(stat_c, 'w', encoding='utf-8') as f:
+            f.write(stat_content)
+        print("[+] Successfully hooked fs/stat.c for BakaSU newfstat/fstat64")
+
     # 11. BakaSU integration: selinux.c, rules.c, sucompat.c, Kconfig, ksud_integration.c, core/init.c
     for ksu_root in [os.path.join(kernel_dir, "drivers", "kernelsu"), os.path.join(kernel_dir, "KernelSU", "kernel")]:
         if not os.path.exists(ksu_root):
