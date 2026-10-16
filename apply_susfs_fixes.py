@@ -104,7 +104,8 @@ DECLARE_WORK(susfs_extra_works, susfs_run_extra_works);
                 f.write("\nobj-$(CONFIG_KSU_SUSFS) += susfs.o\n")
             print("[+] Added obj-$(CONFIG_KSU_SUSFS) += susfs.o to fs/Makefile")
 
-    # 4. Pre-inject Hunk 1 declarations into fs/namespace.c (avoids OPLUS macro conflict)
+    # 4. Pre-inject headers and declarations to ensure 100% clean patch application
+    # 4a. fs/namespace.c (avoids OPLUS macro conflict)
     ns_c = os.path.join(kernel_dir, "fs", "namespace.c")
     if os.path.exists(ns_c):
         with open(ns_c, 'r', encoding='utf-8', errors='ignore') as f:
@@ -125,7 +126,7 @@ static atomic64_t susfs_ksu_mounts = ATOMIC64_INIT(0);
 #endif'''
             patch_file(ns_c, target, inject)
 
-    # 4b. Pre-inject declarations into fs/proc/task_mmu.c
+    # 4b. fs/proc/task_mmu.c
     tm_c = os.path.join(kernel_dir, "fs", "proc", "task_mmu.c")
     if os.path.exists(tm_c):
         with open(tm_c, 'r', encoding='utf-8', errors='ignore') as f:
@@ -138,28 +139,127 @@ static atomic64_t susfs_ksu_mounts = ATOMIC64_INIT(0);
 #endif'''
             patch_file(tm_c, target, inject)
 
-    # 5. Prepare 01_add_susfs_hooks.patch with Hunk 1s removed (so patch succeeds 100%)
+    # 4c. fs/exec.c
+    exec_c = os.path.join(kernel_dir, "fs", "exec.c")
+    if os.path.exists(exec_c):
+        with open(exec_c, 'r', encoding='utf-8', errors='ignore') as f:
+            ec = f.read()
+        if "linux/susfs_def.h" not in ec:
+            target = "#include <linux/vmalloc.h>"
+            if target in ec:
+                ec = ec.replace(target, target + "\n#ifdef CONFIG_KSU_SUSFS\n#include <linux/susfs_def.h>\n#endif", 1)
+            else:
+                ec = "#ifdef CONFIG_KSU_SUSFS\n#include <linux/susfs_def.h>\n#endif\n" + ec
+            with open(exec_c, 'w', encoding='utf-8') as f:
+                f.write(ec)
+            print("[+] Injected linux/susfs_def.h into fs/exec.c")
+
+    # 4d. fs/namei.c
+    namei_c = os.path.join(kernel_dir, "fs", "namei.c")
+    if os.path.exists(namei_c):
+        with open(namei_c, 'r', encoding='utf-8', errors='ignore') as f:
+            nc = f.read()
+        if "linux/susfs_def.h" not in nc:
+            target = "#include <linux/build_bug.h>"
+            if target in nc:
+                nc = nc.replace(target, target + "\n#if defined(CONFIG_KSU_SUSFS_SUS_PATH) || defined(CONFIG_KSU_SUSFS_OPEN_REDIRECT)\n#include <linux/susfs_def.h>\n#endif", 1)
+            else:
+                target2 = "#include <linux/uaccess.h>"
+                nc = nc.replace(target2, target2 + "\n#if defined(CONFIG_KSU_SUSFS_SUS_PATH) || defined(CONFIG_KSU_SUSFS_OPEN_REDIRECT)\n#include <linux/susfs_def.h>\n#endif", 1)
+            with open(namei_c, 'w', encoding='utf-8') as f:
+                f.write(nc)
+            print("[+] Injected linux/susfs_def.h into fs/namei.c")
+
+    # 4e. fs/open.c
+    open_c = os.path.join(kernel_dir, "fs", "open.c")
+    if os.path.exists(open_c):
+        with open(open_c, 'r', encoding='utf-8', errors='ignore') as f:
+            oc = f.read()
+        if "linux/susfs_def.h" not in oc:
+            target = "#include <linux/compat.h>"
+            if target in oc:
+                oc = oc.replace(target, target + "\n#ifdef CONFIG_KSU_SUSFS\n#include <linux/susfs_def.h>\n#endif", 1)
+            else:
+                oc = "#ifdef CONFIG_KSU_SUSFS\n#include <linux/susfs_def.h>\n#endif\n" + oc
+            with open(open_c, 'w', encoding='utf-8') as f:
+                f.write(oc)
+            print("[+] Injected linux/susfs_def.h into fs/open.c")
+
+    # 4f. fs/readdir.c (compat_fillonedir inode declaration)
+    readdir_c = os.path.join(kernel_dir, "fs", "readdir.c")
+    if os.path.exists(readdir_c):
+        with open(readdir_c, 'r', encoding='utf-8', errors='ignore') as f:
+            rc = f.read()
+        if "static int compat_fillonedir" in rc and "struct inode *inode;" not in rc:
+            target = "compat_ulong_t d_ino;"
+            inject = """compat_ulong_t d_ino;
+#ifdef CONFIG_KSU_SUSFS_SUS_PATH
+\tstruct inode *inode;
+#endif"""
+            rc = rc.replace(target, inject, 1)
+            with open(readdir_c, 'w', encoding='utf-8') as f:
+                f.write(rc)
+            print("[+] Injected struct inode *inode into compat_fillonedir in fs/readdir.c")
+
+    # 4g. include/linux/mount.h (susfs_mnt_id_backup field in struct vfsmount)
+    mount_h = os.path.join(kernel_dir, "include", "linux", "mount.h")
+    if os.path.exists(mount_h):
+        with open(mount_h, 'r', encoding='utf-8', errors='ignore') as f:
+            mh = f.read()
+        if "susfs_mnt_id_backup" not in mh:
+            target = "void *data;"
+            inject = """#ifdef CONFIG_KSU_SUSFS
+\tu64 susfs_mnt_id_backup;
+#endif
+\tvoid *data;"""
+            if target in mh:
+                mh = mh.replace(target, inject, 1)
+                with open(mount_h, 'w', encoding='utf-8') as f:
+                    f.write(mh)
+                print("[+] Injected susfs_mnt_id_backup into include/linux/mount.h")
+
+    # 4h. kernel/sys.c (susfs_spoof_uname in newuname)
+    sys_c = os.path.join(kernel_dir, "kernel", "sys.c")
+    if os.path.exists(sys_c):
+        with open(sys_c, 'r', encoding='utf-8', errors='ignore') as f:
+            sc = f.read()
+        if "susfs_spoof_uname" not in sc:
+            decl = """#ifdef CONFIG_KSU_SUSFS_SPOOF_UNAME
+extern void susfs_spoof_uname(struct new_utsname* tmp);
+#endif
+SYSCALL_DEFINE1(newuname,"""
+            sc = sc.replace("SYSCALL_DEFINE1(newuname,", decl, 1)
+            target = "memcpy(&tmp, utsname(), sizeof(tmp));"
+            inject = """memcpy(&tmp, utsname(), sizeof(tmp));
+#ifdef CONFIG_KSU_SUSFS_SPOOF_UNAME
+\tsusfs_spoof_uname(&tmp);
+#endif"""
+            sc = sc.replace(target, inject, 1)
+            with open(sys_c, 'w', encoding='utf-8') as f:
+                f.write(sc)
+            print("[+] Injected susfs_spoof_uname into kernel/sys.c")
+
+    # 5. Prepare 01_add_susfs_hooks.patch with pre-injected and conflicting hunks removed
     p01_src = os.path.join(zee295_dir, "susfs-patches", "01_add_susfs_hooks.patch")
     with open(p01_src, 'r', encoding='utf-8', errors='ignore') as f:
         p01_text = f.read()
 
-    # Locate and omit Hunk 1 of fs/namespace.c
-    h1_tag = '@@ -26,10 +26,23 @@'
-    h2_tag = '@@ -108,6 +121,18 @@'
-    idx1 = p01_text.find(h1_tag)
-    idx2 = p01_text.find(h2_tag)
-    if idx1 != -1 and idx2 != -1:
-        p01_text = p01_text[:idx1] + p01_text[idx2:]
-        print("[+] Omitted pre-injected Hunk 1 of fs/namespace.c from 01_add_susfs_hooks.patch")
+    omits_01 = [
+        ('fs/namespace.c Hunk 1', '@@ -26,10 +26,23 @@', '@@ -108,6 +121,18 @@'),
+        ('fs/proc/task_mmu.c Hunk 1', '@@ -21,6 +21,9 @@', '@@ -348,6 +351,10 @@'),
+        ('fs/exec.c Hunk 1', '@@ -62,6 +62,9 @@', '@@ -1753,6 +1756,15 @@'),
+        ('fs/namei.c Hunk 1', '@@ -40,6 +40,9 @@', '@@ -47,6 +50,15 @@'),
+        ('fs/open.c Hunk 1', '@@ -31,6 +31,9 @@', '@@ -353,6 +356,11 @@'),
+        ('fs/proc/base.c Hunk 3', '@@ -897,6 +903,22 @@', '@@ -2536,6 +2558,13 @@'),
+        ('fs/readdir.c Hunk 17', '@@ -398,9 +574,13 @@', '@@ -409,6 +589,28 @@'),
+    ]
 
-    # Locate and omit Hunk 1 of fs/proc/task_mmu.c
-    tm_h1_tag = '@@ -21,6 +21,9 @@'
-    tm_h2_tag = '@@ -348,6 +351,10 @@'
-    tm_idx1 = p01_text.find(tm_h1_tag)
-    tm_idx2 = p01_text.find(tm_h2_tag)
-    if tm_idx1 != -1 and tm_idx2 != -1:
-        p01_text = p01_text[:tm_idx1] + p01_text[tm_idx2:]
-        print("[+] Omitted pre-injected Hunk 1 of fs/proc/task_mmu.c from 01_add_susfs_hooks.patch")
+    for name, s, e in omits_01:
+        i1 = p01_text.find(s)
+        i2 = p01_text.find(e)
+        if i1 != -1 and i2 != -1 and i1 < i2:
+            p01_text = p01_text[:i1] + p01_text[i2:]
+            print(f"[+] Omitted {name} from 01_add_susfs_hooks.patch")
 
     p01_tmp = os.path.join(kernel_dir, "01_temp.patch")
     with open(p01_tmp, 'w', encoding='utf-8') as f:
@@ -168,13 +268,59 @@ static atomic64_t susfs_ksu_mounts = ATOMIC64_INIT(0);
     apply_patch(kernel_dir, p01_tmp)
     os.remove(p01_tmp)
 
-    # 6. Apply 02_add_susfs_misc.patch
-    p02 = os.path.join(zee295_dir, "susfs-patches", "02_add_susfs_misc.patch")
-    apply_patch(kernel_dir, p02)
+    # 6. Apply 02_add_susfs_misc.patch (omitting mount.h diff and sys.c newuname hunk)
+    p02_src = os.path.join(zee295_dir, "susfs-patches", "02_add_susfs_misc.patch")
+    with open(p02_src, 'r', encoding='utf-8', errors='ignore') as f:
+        p02_text = f.read()
 
-    # 7. Apply 03_fix_exec.patch (if needed)
-    p03 = os.path.join(zee295_dir, "susfs-patches", "03_fix_exec.patch")
-    apply_patch(kernel_dir, p03)
+    omits_02 = [
+        ('mount.h diff', 'diff --git a/include/linux/mount.h b/include/linux/mount.h', 'diff --git a/kernel/sys.c b/kernel/sys.c'),
+        ('sys.c Hunk 2', '@@ -1240,12 +1249,18 @@', 'diff --git a/security/selinux/avc.c b/security/selinux/avc.c'),
+    ]
+
+    for name, s, e in omits_02:
+        i1 = p02_text.find(s)
+        i2 = p02_text.find(e)
+        if i1 != -1 and i2 != -1 and i1 < i2:
+            p02_text = p02_text[:i1] + p02_text[i2:]
+            print(f"[+] Omitted {name} from 02_add_susfs_misc.patch")
+
+    p02_tmp = os.path.join(kernel_dir, "02_temp.patch")
+    with open(p02_tmp, 'w', encoding='utf-8') as f:
+        f.write(p02_text)
+
+    apply_patch(kernel_dir, p02_tmp)
+    os.remove(p02_tmp)
+
+    # 7. Post-inject mem_rw SUS_MAP hook into fs/proc/base.c (after Hunk 2 declared vma)
+    base_c = os.path.join(kernel_dir, "fs", "proc", "base.c")
+    if os.path.exists(base_c):
+        with open(base_c, 'r', encoding='utf-8', errors='ignore') as f:
+            bc = f.read()
+        if "inode->i_mapping->flags & BIT_SUS_MAPS" not in bc:
+            pattern = r'(while\s*\(\s*count\s*>\s*0\s*\)\s*\{\s*\n\s*(?:(?:int|size_t)\s+this_len\s*=\s*min_t\((?:int|size_t),\s*count,\s*PAGE_SIZE\);))'
+            sus_map_inject = r'''\1
+#ifdef CONFIG_KSU_SUSFS_SUS_MAP
+\t\tvma = find_vma(mm, addr);
+\t\tif (vma && vma->vm_file) {
+\t\t\tstruct inode *inode = file_inode(vma->vm_file);
+\t\t\tif (unlikely(inode->i_mapping->flags & BIT_SUS_MAPS) && susfs_is_current_proc_umounted()) {
+\t\t\t\tif (write) {
+\t\t\t\t\tcopied = -EFAULT;
+\t\t\t\t} else {
+\t\t\t\t\tcopied = -EIO;
+\t\t\t\t}
+\t\t\t\t*ppos = addr;
+\t\t\t\tmmput(mm);
+\t\t\t\tgoto free;
+\t\t\t}
+\t\t}
+#endif'''
+            bc_new = re.sub(pattern, sus_map_inject, bc, count=1)
+            if bc_new != bc:
+                with open(base_c, 'w', encoding='utf-8') as f:
+                    f.write(bc_new)
+                print("[+] Successfully injected mem_rw SUS_MAP hook into fs/proc/base.c")
 
     # Clean up any patch backup/reject files
     for root, dirs, files in os.walk(kernel_dir):
