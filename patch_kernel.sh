@@ -4,13 +4,17 @@ set -e
 cd $GITHUB_WORKSPACE/device_kernel
 
 echo "=========================================="
-echo "0. Fixing Qualcomm scripts/gcc-wrapper.py (Bypass Python 2 dependency)..."
+echo "0. Fixing Qualcomm scripts/gcc-wrapper.py (Transparent Python 2/3 passthrough)..."
 echo "=========================================="
 if [ -f scripts/gcc-wrapper.py ]; then
-    echo '#!/bin/sh' > scripts/gcc-wrapper.py
-    echo 'exec "$@"' >> scripts/gcc-wrapper.py
+    cat << 'EOF' > scripts/gcc-wrapper.py
+#!/usr/bin/env python
+import sys
+import subprocess
+sys.exit(subprocess.call(sys.argv[1:]))
+EOF
     chmod +x scripts/gcc-wrapper.py
-    echo "[+] scripts/gcc-wrapper.py successfully bypassed"
+    echo "[+] scripts/gcc-wrapper.py successfully patched for Python 3"
 fi
 
 echo "=========================================="

@@ -36,7 +36,7 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             git ccache automake flex lzop bison build-essential zip curl \
             bc libssl-dev libelf-dev libfl-dev python3 device-tree-compiler \
-            cpio zstd binutils p7zip-full dwarves patch python2 || true
+            cpio zstd binutils p7zip-full dwarves patch
 
           curl -s -L http://launchpadlibrarian.net/580830584/libtinfo5_6.3-2_amd64.deb -o libtinfo5.deb || true
           if [ -f libtinfo5.deb ]; then
@@ -74,13 +74,6 @@ jobs:
         run: |
           cd $GITHUB_WORKSPACE/device_kernel
           export PATH=$GITHUB_WORKSPACE/clang-custom/bin:$PATH
-
-          # Bypass Qualcomm gcc-wrapper.py
-          if [ -f scripts/gcc-wrapper.py ]; then
-            echo '#!/bin/sh' > scripts/gcc-wrapper.py
-            echo 'exec "$@"' >> scripts/gcc-wrapper.py
-            chmod +x scripts/gcc-wrapper.py
-          fi
 
           # Stock build environment spoofing (matches user OnePlus 8T stock banner)
           export KBUILD_BUILD_USER="jenkins"
